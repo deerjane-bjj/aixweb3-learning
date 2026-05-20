@@ -1,7 +1,6 @@
 ## 我正在學習AI側的資訊
 
-AI term: Token
-
+【Token】
 Simple definition:
 
 AI token is the basic unit of a model to process language. AI models won’t read like humans, - one word by one word. A tokenizer is to chop the natural language text into small pieces for an AI model. Those pieces are tokens.
@@ -17,6 +16,7 @@ Important: It is important to organize the information you want to ask AI model 
 Long and unorganized questions will lead to AI models missing focus.
 
 I really like the analog form Chatgpt:
+
 你可以把 AI 想成一个读书助手，但它不是直接读“整本书”，而是先把书剪成一张张小纸片。
 例如你给它一句话：
 今天天气很好，我想去学习 AI。
@@ -31,19 +31,18 @@ AI 可能只抓到表面信息；
 回答会变慢或变贵。
 
 
-
-Embedding (衡量“语义上是否接近”)
+【Embedding 】(衡量“语义上是否接近”)
 let the model convert the human language into a series of numbers, the text with similar meaning, the numbers are closer (like 1,2), the meaning is different, the numbers are farer.(like 1, 8) - but 真实 embedding 可能有几百或几千维。
 第 1 步：把文字切成 token
 第 2 步：每个 token 先变成数字
 第 3 步：模型根据上下文调整整句话的表示
 第 4 步：用训练目标逼它学会相似和不相似 (对比学习)
 
-Transformer 它不是只記單字，而是在建立文字之間的關係網。
 
+【Transformer】 它不是只記單字，而是在建立文字之間的關係網。
 It is a core infrastructure of modern LLM, it allows the model to recognize which part of the sentence is most important and which parts are relevant when it read a sentence. It also with a feature called: attention. Attention makes LLM distinguish the relationship between different tokens, rather than only reading the sentence from left to right. 
 
-Attention
+【Attention】
 例如這句話：
 小明把錢包交給小王，因為他要去簽名。
 這裡的「他」是誰？
@@ -56,27 +55,21 @@ Transformer 很擅長找語言模式和上下文關係，但它仍可能：
 對高風險交易給出不完整判斷。
 
 
-
-
-
-
-
-
-
-
-Hallucination AI 很自信地說錯話
+【Hallucination 】（AI 很自信地說錯話）
 AI generates a wrong answer but looks correct.
 
 Why this happens:
-因為 LLM 不是傳統資料庫。
+# 因為 LLM 不是傳統資料庫。
 它不是每次回答都先查一個真實表格，再逐字引用。
 它主要是根據已看到的上下文和訓練學到的模式，生成看起來合理的文字。
 处理幻觉不要只靠“写更好的 prompt”。更可靠的方式是把模型输出接到外部校验：来源引用、schema 校验、规则检查、人工确认和审计日志。
-Multimodal
+
+
+【Multimodal】
 An AI model can handle not only text, but also pictures, soundtracks, videos,charts,screenshots, PDF, tables etc.
 
 
-Prompt
+【Prompt】
 Prompt 是你和模型之间的接口设计。它不只是“怎么问 AI”，而是把任务目标、输入边界、输出格式、失败处理和安全规则写进一次可执行的沟通协议。
 
 How to write a better prompt:
@@ -86,47 +79,43 @@ Prompt 的价值在于把模糊任务变成模型可以稳定执行的工作说�
 
 好的 prompt 不是让模型更自信，而是让模型在合适的时候停下来。prompt 应该负责表达任务，系统应该负责执行约束。
 
-Instruction - 給模型的任务指令
-你要做什麼、不要做什麼、用什麼方式回答、遵守什麼限制
-
-在真实产品里，instruction 要特别区分“解释”和“执行”。
-
-
-
-
+【Instruction】 - 給模型的任务指令
+你要做什麼、不要做什麼、用什麼方式回答、遵守什麼限制。在真实产品里，instruction 要特别区分“解释”和“执行”。
 
 例如你可以只問：
 解釋 token
 這是一個很簡短的 prompt，但 instruction 不夠清楚。
+
 更清楚的 instruction 是：
 請用新手友好的方式解釋 AI 裡的 token。
 請先用非技術語言說明，再給一個生活類比，最後給 3 個自測問題。
 不要討論 Web3 token。
 這裡的 Instruction 包含了：
-指令
-作用
-解釋 AI 裡的 token
-告訴 AI 任務
-用新手友好方式
-告訴 AI 難度
-先非技術語言，再生活類比
-告訴 AI 結構
-給 3 個自測問題
-告訴 AI 輸出內容
-不要討論 Web3 token
-告訴 AI 邊界
+- 指令
+- 作用
+- 解釋 AI 裡的 token
+- 告訴 AI 任務
+- 用新手友好方式
+- 告訴 AI 難度
+- 先非技術語言，再生活類比
+- 告訴 AI 結構
+- 給 3 個自測問題
+- 告訴 AI 輸出內容
+- 不要討論 Web3 token
+- 告訴 AI 邊界
 
+一個好 Instruction 的基本公式：
+“角色 + 任務 + 背景 + 輸出格式 + 限制”
 
-一個好 Instruction 的基本公式
-角色 + 任務 + 背景 + 輸出格式 + 限制
+【Few-shot】 是在 prompt 里放少量示例，让模型模仿示例的判断方式和输出格式。
 
-Few-shot 是在 prompt 里放少量示例，让模型模仿示例的判断方式和输出格式。
+【Structured Output】 （结构化输出）是让模型按固定结构返回结果，例如 JSON object、函数参数或 schema 约束字段。结构化输出不是为了好看，而是为了让后续代码能检查、拒绝、记录和回归测试。
 
-Structured Output （结构化输出）是让模型按固定结构返回结果，例如 JSON object、函数参数或 schema 约束字段。结构化输出不是为了好看，而是为了让后续代码能检查、拒绝、记录和回归测试。
+【Prompt Injection】 是攻击者通过用户输入、网页、文档、邮件或检索内容，让模型忽略原始规则、泄露信息或调用危险工具。 - 【AI security】相關
 
-Prompt Injection 是攻击者通过用户输入、网页、文档、邮件或检索内容，让模型忽略原始规则、泄露信息或调用危险工具。 - AI security相關
+应对 Prompt Injection 的核心不是写一句“不要被注入”。
 
-应对 Prompt Injection 的核心不是写一句“不要被注入”。更稳的做法是：
+更稳的做法是：
 把外部内容标记为不可信数据
 工具调用前做参数校验
 敏感动作强制走 allowlist 和 human approval
