@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>交易解释器最小 Demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace">
+        <aside class="control-panel" aria-label="交易输入">
+          <div>
+            <p class="eyebrow">AI x Web3 School / LLM 最小实践</p>
+            <h1>交易解释器</h1>
+            <p class="lede">
+              输入交易哈希，系统读取交易详情、事件日志和 ABI，再生成一份带来源边界的解释。
+            </p>
+          </div>
+
+          <form id="tx-form" class="tx-form">
+            <label for="tx-hash">交易哈希</label>
+            <div class="input-row">
+              <input
+                id="tx-hash"
+                name="txHash"
+                spellcheck="false"
+                value="0x7b8f4b5c3f9e2a1d6e0c6f3a9b0d7e8f2c4a1b9d8e7f6c5b4a39281726354455"
+              />
+              <button type="submit">解释</button>
+            </div>
+            <label for="network">网络</label>
+            <select id="network" name="network">
+              <option value="ethereum">Ethereum Mainnet</option>
+            </select>
+            <div class="quick-actions">
+              <button id="sample-button" class="secondary-button" type="button">载入样例</button>
+            </div>
+            <p id="status" class="hint">输入真实交易哈希会尝试从公共 RPC、Sourcify 和签名库查询。</p>
+          </form>
+
+          <div class="source-stack" aria-label="输入来源">
+            <div class="source-item">
+              <span class="source-dot chain"></span>
+              <div>
+                <strong>链上事实</strong>
+                <span>RPC 交易字段、receipt、logs、Transfer 事件</span>
+              </div>
+            </div>
+            <div class="source-item">
+              <span class="source-dot abi"></span>
+              <div>
+                <strong>ABI / 规则</strong>
+                <span>Sourcify ABI、函数签名库、token decimals</span>
+              </div>
+            </div>
+            <div class="source-item">
+              <span class="source-dot model"></span>
+              <div>
+                <strong>模型推断</strong>
+                <span>动作归纳、风险提示、不确定性说明</span>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="results" aria-live="polite">
+          <nav class="tabs" aria-label="结果视图">
+            <button class="tab active" type="button" data-tab="explanation">解释</button>
+            <button class="tab" type="button" data-tab="facts">链上事实</button>
+            <button class="tab" type="button" data-tab="prompt">LLM 上下文</button>
+          </nav>
+
+          <section id="explanation" class="tab-panel active">
+            <div id="summary" class="summary-grid"></div>
+          </section>
+
+          <section id="facts" class="tab-panel">
+            <div class="panel-heading">
+              <h2>确定性解析结果</h2>
+              <p>这些内容来自内置交易、receipt、事件日志和 ABI 解码，不由模型创造。</p>
+            </div>
+            <pre id="facts-json" class="code-block"></pre>
+          </section>
+
+          <section id="prompt" class="tab-panel">
+            <div class="panel-heading">
+              <h2>发送给 LLM 的上下文</h2>
+              <p>真实实现中应只把必要事实放入上下文，并要求模型按 schema 输出。</p>
+            </div>
+            <pre id="prompt-json" class="code-block"></pre>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
