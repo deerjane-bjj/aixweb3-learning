@@ -18,7 +18,8 @@ const requiredFields = [
 let inputState = {
   hasTemplate: true,
   hasCoreFields: true,
-  hasSimulation: true
+  hasSimulation: true,
+  missingFields: []
 };
 
 const transactionTemplate = document.querySelector("#transactionTemplate");
@@ -29,7 +30,7 @@ const checks = document.querySelector("#checks");
 
 function extractField(text, labels) {
   for (const label of labels) {
-    const pattern = new RegExp(`${label}[：:]\\s*([^\\n]+)`, "i");
+    const pattern = new RegExp(`${label}[：:][ \\t]*([^\\n]*)`, "i");
     const match = text.match(pattern);
     if (match) return match[1].trim();
   }
@@ -52,7 +53,8 @@ function parseTemplateInput() {
   const raw = transactionTemplate.value.trim();
   const intent = extractField(raw, ["用户意图", "用户原始意图", "原始意图"]);
   const target = extractField(raw, ["交易目标地址", "目标地址"]);
-  const functionName = extractField(raw, ["函数名", "function"]) || (/授权|approve/i.test(raw) ? "approve" : "transfer");
+  const explicitFunctionName = extractField(raw, ["函数名", "function"]);
+  const functionName = explicitFunctionName;
   const paramsText = extractField(raw, ["参数", "params"]);
   const assetChangesText = extractField(raw, ["资产变化", "asset changes"]);
   const simulation = extractField(raw, ["Simulation", "simulation", "模拟结果"]);
@@ -75,8 +77,16 @@ function parseTemplateInput() {
 
   inputState = {
     hasTemplate: Boolean(raw),
-    hasCoreFields: Boolean(intent && target && functionName && paramsText),
-    hasSimulation: Boolean(simulation)
+    hasCoreFields: Boolean(intent && target && explicitFunctionName && paramsText && assetChangesText && simulation),
+    hasSimulation: Boolean(simulation),
+    missingFields: getMissingFields({
+      "用户意图": intent,
+      "交易目标地址": target,
+      "函数名": explicitFunctionName,
+      "参数": paramsText,
+      "资产变化": assetChangesText,
+      "Simulation": simulation
+    })
   };
 
   return {
@@ -92,62 +102,110 @@ function parseTemplateInput() {
   };
 }
 
+function getMissingFields(fields) {
+  return Object.entries(fields)
+    .filter(([, value]) => isMissingValue(value))
+    .map(([label]) => label);
+}
+
+function isMissingValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return !normalized ||
+    ["unknown", "null", "undefined", "n/a", "na", "-"].includes(normalized) ||
+    /未知|未提供|无法判断|不确定|空/.test(normalized);
+}
+
 function simulateModel(data) {
   const tx = data.transaction;
   const sim = data.simulation_result.toLowerCase();
   const intent = data.user_intent.toLowerCase();
-  const hasInputProblem = !tx.target_address || !tx.function_name || !data.user_intent || !inputState.hasTemplate;
-
-  if (hasInputProblem) {
-    return {
-      summary: "输入缺少关键字段，无法可靠判断交易风险。",
-      asset_changes: [],
-      permissions_changed: [],
-      risk_level: "high",
-      requires_human_approval: true,
-      uncertainties: ["模板中缺少用户意图、交易目标地址、函数名、参数、资产变化或 Simulation。"],
-      recommended_user_checks: ["补全模板后重新生成摘要。", "不要在信息不完整时签名交易。"]
-    };
-  }
-
   const priorityRisk = evaluatePriorityRisk(tx, intent);
+  const intentMismatch = evaluateIntentMismatch(data, priorityRisk);
   const isUnlimitedApproval = priorityRisk.isUnlimitedApproval;
-  const hasSpenderMismatch = priorityRisk.hasSpenderMismatch;
+  const hasSpenderMismatch = intentMismatch.hasSpenderMismatch;
   const recipient = tx.params.to || tx.params.spender || tx.target_address;
-  const targetMismatch = tx.function_name === "transfer" && !intentMatchesRecipient(intent, recipient);
+  const targetMismatch = intentMismatch.hasRecipientMismatch;
+  const amountMismatch = intentMismatch.hasAmountMismatch;
   const hasPermissionChange = tx.function_name === "approve" || /获得|开放|新增|授权/.test(sim) && !sim.includes("没有新增授权");
+  const hasMissingFields = inputState.missingFields.length > 0 || !inputState.hasTemplate;
+  const simulationClean = isSimulationClean(sim);
 
   let risk = "low";
-  if (priorityRisk.high || targetMismatch) risk = "high";
+  if (priorityRisk.high || intentMismatch.high) risk = "high";
+  else if (hasMissingFields) risk = "medium";
   else if (hasPermissionChange) risk = "medium";
+  else if (!simulationClean) risk = "medium";
 
   return {
-    summary: summarize(tx, isUnlimitedApproval, targetMismatch, hasSpenderMismatch),
+    summary: summarize(tx, isUnlimitedApproval, targetMismatch, hasSpenderMismatch, amountMismatch),
     asset_changes: tx.asset_changes.length
       ? tx.asset_changes.map((change) => `${change.asset} ${change.direction === "out" ? "-" : "+"}${change.amount} -> ${change.to}`)
       : ["没有立即资产转移"],
     permissions_changed: buildPermissionChanges(tx, hasPermissionChange, isUnlimitedApproval),
     risk_level: risk,
     requires_human_approval: risk !== "low",
-    uncertainties: buildUncertainties(isUnlimitedApproval, targetMismatch, sim, hasSpenderMismatch),
+    uncertainties: buildUncertainties(isUnlimitedApproval, targetMismatch, sim, hasSpenderMismatch, inputState.missingFields, amountMismatch),
     recommended_user_checks: buildRecommendedChecks(risk, recipient)
   };
 }
 
 function evaluatePriorityRisk(tx, intent) {
   const isApproval = tx.function_name === "approve";
-  const spender = String(tx.params.spender || "").toLowerCase();
   const isUnlimitedApproval = isApproval && isUnlimitedApprovalAmount(tx.params.amount);
-  const intendedSpender = extractIntendedSpender(intent);
-  const spenderIsUnknown = !spender || spender.includes("unknown spender") || spender === "unknown";
-  const hasSpenderMismatch = isApproval && intendedSpender &&
-    (spenderIsUnknown || !spenderMatchesIntent(spender, intendedSpender));
 
   return {
-    high: isUnlimitedApproval || hasSpenderMismatch,
-    isUnlimitedApproval,
-    hasSpenderMismatch
+    high: isUnlimitedApproval,
+    isUnlimitedApproval
   };
+}
+
+function evaluateIntentMismatch(data, priorityRisk) {
+  const tx = data.transaction;
+  const intent = data.user_intent.toLowerCase();
+  const recipient = tx.params.to || tx.params.spender || tx.target_address;
+  const intendedSpender = extractIntendedSpender(intent);
+  const spender = String(tx.params.spender || "").toLowerCase();
+  const spenderIsUnknown = isMissingValue(spender) || spender.includes("unknown spender");
+  const hasSpenderMismatch = tx.function_name === "approve" && intendedSpender &&
+    (spenderIsUnknown || !spenderMatchesIntent(spender, intendedSpender));
+  const hasRecipientMismatch = tx.function_name === "transfer" && recipient && intent && !intentMatchesRecipient(intent, recipient);
+  const hasAmountMismatch = evaluateAmountMismatch(data, priorityRisk);
+
+  return {
+    high: hasSpenderMismatch || hasRecipientMismatch || hasAmountMismatch,
+    hasSpenderMismatch,
+    hasRecipientMismatch,
+    hasAmountMismatch
+  };
+}
+
+function evaluateAmountMismatch(data, priorityRisk) {
+  const actualAmount = String(data.transaction.params.amount || "").toLowerCase();
+  if (!actualAmount) return false;
+  if (isUnlimitedApprovalAmount(actualAmount)) return true;
+
+  const intendedAmount = extractIntentAmount(data.user_intent);
+  const actualNumber = parseNumber(actualAmount);
+  if (intendedAmount === null || actualNumber === null) return false;
+
+  return actualNumber > intendedAmount * 1.25;
+}
+
+function extractIntentAmount(intent) {
+  const match = String(intent || "").match(/(\d+(?:\.\d+)?)\s*(ETH|USDC|USDT|DAI|WBTC)?/i);
+  return match ? Number(match[1]) : null;
+}
+
+function parseNumber(value) {
+  const match = String(value || "").match(/(\d+(?:\.\d+)?)/);
+  return match ? Number(match[1]) : null;
+}
+
+function isSimulationClean(sim) {
+  const hasSuccess = sim.includes("成功") || sim.includes("success");
+  const explicitlyNoWarning = /没有警告|无警告|no warning|no warnings/.test(sim);
+  const hasProblemSignal = /警告|warning|warn|失败|异常|error|revert|风险/.test(sim);
+  return hasSuccess && (explicitlyNoWarning || !hasProblemSignal);
 }
 
 function extractIntendedSpender(intent) {
@@ -204,14 +262,23 @@ function buildPermissionChanges(tx, hasPermissionChange, isUnlimitedApproval) {
   return ["存在授权变化，需要核对额度与 spender"];
 }
 
-function summarize(tx, isUnlimitedApproval, targetMismatch, hasSpenderMismatch) {
+function summarize(tx, isUnlimitedApproval, targetMismatch, hasSpenderMismatch, amountMismatch) {
   const amount = tx.params.amount || "未知数量";
   const token = tx.params.token || "";
+  if (!inputState.hasTemplate) {
+    return "输入模板为空，无法可靠判断交易风险。";
+  }
+  if (inputState.missingFields.length > 0 && !isUnlimitedApproval && !targetMismatch && !hasSpenderMismatch) {
+    return `模板缺少 ${inputState.missingFields.join("、")}，需要补充后再判断交易。`;
+  }
   if (isUnlimitedApproval) {
     return `这笔交易不会立即转出资产，但会给 ${tx.params.spender || "unknown spender"} 无限 ${token || "unknown"} 授权。`;
   }
   if (hasSpenderMismatch) {
     return `这笔 approve 的 spender 是 ${tx.params.spender || "unknown spender"}，与用户意图中的授权对象不匹配。`;
+  }
+  if (amountMismatch) {
+    return `交易实际 amount 是 ${tx.params.amount || "unknown"}，与用户意图中的金额明显不一致。`;
   }
   if (targetMismatch) {
     return `这笔交易会向 ${tx.params.to} 转出 ${amount} ${token}，但目标地址与用户意图不一致。`;
@@ -222,34 +289,36 @@ function summarize(tx, isUnlimitedApproval, targetMismatch, hasSpenderMismatch) 
   return `这笔交易调用 ${tx.function_name}，需要继续核对参数和 simulation。`;
 }
 
-function buildUncertainties(isUnlimitedApproval, targetMismatch, sim, hasSpenderMismatch) {
+function buildUncertainties(isUnlimitedApproval, targetMismatch, sim, hasSpenderMismatch, missingFields = [], amountMismatch = false) {
   const items = [];
+  if (missingFields.length > 0) items.push(`模板缺少字段：${missingFields.join("、")}。`);
   if (isUnlimitedApproval) items.push("无法仅凭 prompt 判断 spender 是否可信。");
   if (hasSpenderMismatch) items.push("用户意图提到授权对象，但 spender 不是同一个对象或无法识别。");
+  if (amountMismatch) items.push("交易实际 amount 与用户意图中的金额明显不一致。");
   if (targetMismatch) items.push("目标地址与用户原始意图冲突，需要用户重新确认。");
   if (!sim.includes("成功")) items.push("simulation 没有明确成功结果。");
+  else if (!isSimulationClean(sim)) items.push("simulation 成功但包含警告或异常信号。");
   return items.length ? items : ["未发现明显不确定点，但仍应核对钱包弹窗字段。"];
 }
 
 function buildRecommendedChecks(risk, recipient) {
-  const checks = [`核对钱包弹窗里的目标地址：${recipient}`];
+  const checks = [`核对钱包弹窗里的目标地址：${recipient || "unknown"}`];
   checks.push("核对资产、数量、网络和 gas。");
+  if (risk === "medium" && inputState.missingFields.length > 0) checks.push("补全模板缺失字段后重新生成摘要。");
   if (risk === "high") checks.push("暂停签名，先用区块浏览器或可信来源验证目标地址。");
   return checks;
 }
 
 function classifyCase(source) {
   const tx = source.transaction;
-  const intent = source.user_intent.toLowerCase();
-  const recipient = tx.params.to || tx.params.spender || tx.target_address;
-  const priorityRisk = evaluatePriorityRisk(tx, intent);
-  const targetMismatch = tx.function_name === "transfer" && recipient && !intentMatchesRecipient(intent, recipient);
+  const priorityRisk = evaluatePriorityRisk(tx, source.user_intent.toLowerCase());
+  const intentMismatch = evaluateIntentMismatch(source, priorityRisk);
 
   if (!tx.target_address || !tx.function_name || !source.user_intent || !inputState.hasTemplate) {
     return "输入不完整，暂不能匹配三组案例";
   }
   if (priorityRisk.isUnlimitedApproval) return "无限授权";
-  if (priorityRisk.hasSpenderMismatch || targetMismatch) return "目标地址与用户意图不匹配";
+  if (intentMismatch.high) return "目标地址与用户意图不匹配";
   return "普通转账";
 }
 
@@ -257,12 +326,14 @@ function validateResult(result, source) {
   const missing = requiredFields.filter((field) => !(field in result));
   const schemaOk = missing.length === 0 && ["low", "medium", "high"].includes(result.risk_level);
   const approvalOk = result.risk_level === "low" || result.requires_human_approval === true;
-  const mismatchDetected = source.transaction.function_name !== "transfer" ||
-    intentMatchesRecipient(source.user_intent.toLowerCase(), source.transaction.params.to || "") ||
-    result.risk_level === "high";
+  const priorityRisk = evaluatePriorityRisk(source.transaction, source.user_intent.toLowerCase());
+  const intentMismatch = evaluateIntentMismatch(source, priorityRisk);
+  const mismatchDetected = !intentMismatch.high || result.risk_level === "high";
   const approvalDetected = source.transaction.function_name !== "approve" ||
     result.permissions_changed.some((item) => typeof item === "string" ? item.includes("授权") : item.permission);
   const priorityRiskOk = validatePriorityRules(result, source);
+  const missingFieldsRuleOk = validateMissingFieldsRule(result, source);
+  const lowRiskRuleOk = validateLowRiskRule(result, source);
 
   return [
     {
@@ -279,7 +350,7 @@ function validateResult(result, source) {
       title: "Web3 风险规则",
       state: mismatchDetected && approvalDetected ? "pass" : "warn",
       body: mismatchDetected && approvalDetected
-        ? "地址不匹配和授权变化能被代码层规则复核。"
+        ? "意图不匹配和授权变化能被代码层规则复核。"
         : "存在 prompt 可能漏判的风险，需要 Guard 拦截。"
     },
     {
@@ -288,6 +359,20 @@ function validateResult(result, source) {
       body: priorityRiskOk
         ? "无限授权和授权对象不匹配会先于普通规则执行。"
         : "高优先级风险规则没有被正确强制执行。"
+    },
+    {
+      title: "字段缺失规则",
+      state: missingFieldsRuleOk ? "pass" : "fail",
+      body: missingFieldsRuleOk
+        ? "任一模板字段缺失时至少标记 medium，且不会覆盖 approve + unlimited 的 high。"
+        : "字段缺失时的风险等级没有按规则处理。"
+    },
+    {
+      title: "低风险规则",
+      state: lowRiskRuleOk ? "pass" : "fail",
+      body: lowRiskRuleOk
+        ? "只有字段完整、simulation 成功且无警告、意图一致、无异常授权时才允许 low。"
+        : "当前输出不满足 low 的全部前置条件。"
     }
   ];
 }
@@ -306,6 +391,34 @@ function validatePriorityRules(result, source) {
     item.permission === "unlimited approval" &&
     item.risk === "spender may transfer the user's tokens in the future"
   );
+}
+
+function validateMissingFieldsRule(result, source) {
+  const hasMissingFields = inputState.missingFields.length > 0 || !inputState.hasTemplate;
+  if (!hasMissingFields) return true;
+
+  const priorityRisk = evaluatePriorityRisk(source.transaction, source.user_intent.toLowerCase());
+  if (priorityRisk.high) return result.risk_level === "high" && result.requires_human_approval === true;
+
+  const intentMismatch = evaluateIntentMismatch(source, priorityRisk);
+  if (intentMismatch.high) return result.risk_level === "high" && result.requires_human_approval === true;
+
+  return result.risk_level === "medium" && result.requires_human_approval === true;
+}
+
+function validateLowRiskRule(result, source) {
+  if (result.risk_level !== "low") return true;
+
+  const priorityRisk = evaluatePriorityRisk(source.transaction, source.user_intent.toLowerCase());
+  const intentMismatch = evaluateIntentMismatch(source, priorityRisk);
+  const hasPermissionChange = source.transaction.function_name === "approve";
+
+  return inputState.missingFields.length === 0 &&
+    inputState.hasTemplate &&
+    isSimulationClean(source.simulation_result.toLowerCase()) &&
+    !priorityRisk.high &&
+    !intentMismatch.high &&
+    !hasPermissionChange;
 }
 
 function runDemo() {
@@ -338,7 +451,9 @@ function validateInputs() {
     {
       title: "关键字段抽取",
       state: inputState.hasCoreFields ? "pass" : "fail",
-      body: inputState.hasCoreFields ? "已抽取用户意图、目标地址、函数名和参数。" : "模板里需要包含用户意图、目标地址、函数名和参数。"
+      body: inputState.hasCoreFields
+        ? "已抽取用户意图、目标地址、函数名、参数、资产变化和 Simulation。"
+        : `缺少字段：${inputState.missingFields.join("、") || "全部模板内容"}。`
     },
     {
       title: "Simulation 线索",
