@@ -15,7 +15,7 @@
 资产变化：用户减少 100 USDC
 Simulation：成功，没有警告
 
-2）无限授权：
+  2）无限授权：
 用户意图：我想授权 Uniswap 使用 50 USDC 来兑换
 交易目标地址：0xUSDC_TOKEN
 函数名：approve
@@ -23,7 +23,7 @@ Simulation：成功，没有警告
 资产变化：没有直接资产转出
 Simulation：成功，警告：Approval amount is unlimited
 
-3）目标地址与用户意图不匹配：
+  3）目标地址与用户意图不匹配：
 用户意图：我想给 Alice 转 100 USDC
 交易目标地址：0xUSDC_TOKEN
 函数名：transfer
