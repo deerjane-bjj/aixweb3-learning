@@ -37,6 +37,50 @@ function extractField(text, labels) {
   return "";
 }
 
+function extractFieldAcrossText(text, labels) {
+  const allLabels = [
+    "用户意图",
+    "用户原始意图",
+    "原始意图",
+    "交易目标地址",
+    "目标地址",
+    "函数名",
+    "function",
+    "参数",
+    "params",
+    "资产变化",
+    "asset changes",
+    "Simulation",
+    "simulation",
+    "模拟结果"
+  ];
+
+  for (const label of labels) {
+    const otherLabels = allLabels.filter((item) => item.toLowerCase() !== label.toLowerCase());
+    const pattern = new RegExp(`${label}[：:][ \\t]*([\\s\\S]*?)(?=\\s*(?:${otherLabels.join("|")})[：:]|$)`, "i");
+    const match = text.match(pattern);
+    if (match) return match[1].trim().replace(/\s+/g, " ");
+  }
+  return "";
+}
+
+function normalizeTemplateText(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return "";
+
+  const fields = [
+    ["用户意图", extractFieldAcrossText(normalized, ["用户意图", "用户原始意图", "原始意图"])],
+    ["交易目标地址", extractFieldAcrossText(normalized, ["交易目标地址", "目标地址"])],
+    ["函数名", extractFieldAcrossText(normalized, ["函数名", "function"])],
+    ["参数", extractFieldAcrossText(normalized, ["参数", "params"])],
+    ["资产变化", extractFieldAcrossText(normalized, ["资产变化", "asset changes"])],
+    ["Simulation", extractFieldAcrossText(normalized, ["Simulation", "simulation", "模拟结果"])]
+  ];
+
+  if (!fields.some(([, value]) => value)) return text;
+  return fields.map(([label, value]) => `${label}：${value}`).join("\n");
+}
+
 function parseKeyValueParams(text) {
   const params = {};
   text.split(",").forEach((pair) => {
@@ -50,6 +94,7 @@ function parseKeyValueParams(text) {
 }
 
 function parseTemplateInput() {
+  transactionTemplate.value = normalizeTemplateText(transactionTemplate.value);
   const raw = transactionTemplate.value.trim();
   const intent = extractField(raw, ["用户意图", "用户原始意图", "原始意图"]);
   const target = extractField(raw, ["交易目标地址", "目标地址"]);
@@ -485,5 +530,13 @@ function validateInputs() {
 }
 
 document.querySelector("#runButton").addEventListener("click", runDemo);
+transactionTemplate.addEventListener("paste", () => {
+  window.setTimeout(() => {
+    transactionTemplate.value = normalizeTemplateText(transactionTemplate.value);
+  }, 0);
+});
+transactionTemplate.addEventListener("blur", () => {
+  transactionTemplate.value = normalizeTemplateText(transactionTemplate.value);
+});
 transactionTemplate.value = defaultTemplate;
 runDemo();

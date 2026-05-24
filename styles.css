@@ -172,6 +172,7 @@ button {
 textarea {
   width: 100%;
   resize: vertical;
+  overflow-x: auto;
   padding: 12px;
   color: var(--text);
   background: #fbfcfe;
