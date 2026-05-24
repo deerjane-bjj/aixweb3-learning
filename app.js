@@ -163,12 +163,14 @@ function evaluateIntentMismatch(data, priorityRisk) {
   const tx = data.transaction;
   const intent = data.user_intent.toLowerCase();
   const recipient = tx.params.to || tx.params.spender || tx.target_address;
+  const intendedRecipient = extractIntendedRecipient(intent);
   const intendedSpender = extractIntendedSpender(intent);
   const spender = String(tx.params.spender || "").toLowerCase();
   const spenderIsUnknown = isMissingValue(spender) || spender.includes("unknown spender");
   const hasSpenderMismatch = tx.function_name === "approve" && intendedSpender &&
     (spenderIsUnknown || !spenderMatchesIntent(spender, intendedSpender));
-  const hasRecipientMismatch = tx.function_name === "transfer" && recipient && intent && !intentMatchesRecipient(intent, recipient);
+  const hasRecipientMismatch = tx.function_name === "transfer" && intendedRecipient && recipient &&
+    !recipientMatchesIntent(recipient, intendedRecipient);
   const hasAmountMismatch = evaluateAmountMismatch(data, priorityRisk);
 
   return {
@@ -177,6 +179,20 @@ function evaluateIntentMismatch(data, priorityRisk) {
     hasRecipientMismatch,
     hasAmountMismatch
   };
+}
+
+function extractIntendedRecipient(intent) {
+  const patterns = [
+    /给\s+([a-z0-9_\-\u4e00-\u9fa5]+)/i,
+    /转给\s+([a-z0-9_\-\u4e00-\u9fa5]+)/i,
+    /send\s+(?:to\s+)?([a-z0-9_\-\u4e00-\u9fa5]+)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = intent.match(pattern);
+    if (match) return normalizeRecipientName(match[1]);
+  }
+  return "";
 }
 
 function evaluateAmountMismatch(data, priorityRisk) {
@@ -240,11 +256,16 @@ function isUnlimitedApprovalAmount(amount) {
     value.includes("115792089237316195423570985008687907853269984665640564039457584007913129639935");
 }
 
-function intentMatchesRecipient(intent, recipient) {
-  if (!recipient) return false;
-  const normalizedRecipient = recipient.toLowerCase();
-  const recipientAlias = normalizedRecipient.replace(/^0x/, "");
-  return intent.includes(normalizedRecipient) || intent.includes(recipientAlias);
+function recipientMatchesIntent(recipient, intendedRecipient) {
+  const normalizedRecipient = normalizeRecipientName(recipient);
+  return normalizedRecipient.includes(intendedRecipient) || intendedRecipient.includes(normalizedRecipient);
+}
+
+function normalizeRecipientName(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/^0x/, "")
+    .replace(/[^a-z0-9\u4e00-\u9fa5]/g, "");
 }
 
 function buildPermissionChanges(tx, hasPermissionChange, isUnlimitedApproval) {
@@ -281,7 +302,7 @@ function summarize(tx, isUnlimitedApproval, targetMismatch, hasSpenderMismatch, 
     return `交易实际 amount 是 ${tx.params.amount || "unknown"}，与用户意图中的金额明显不一致。`;
   }
   if (targetMismatch) {
-    return `这笔交易会向 ${tx.params.to} 转出 ${amount} ${token}，但目标地址与用户意图不一致。`;
+    return `这笔交易会向 ${tx.params.to} 转出 ${amount} ${token}，但收款人与用户意图不一致。`;
   }
   if (tx.function_name === "transfer") {
     return `这笔交易会向 ${tx.params.to} 转出 ${amount} ${token}。`;
@@ -295,14 +316,14 @@ function buildUncertainties(isUnlimitedApproval, targetMismatch, sim, hasSpender
   if (isUnlimitedApproval) items.push("无法仅凭 prompt 判断 spender 是否可信。");
   if (hasSpenderMismatch) items.push("用户意图提到授权对象，但 spender 不是同一个对象或无法识别。");
   if (amountMismatch) items.push("交易实际 amount 与用户意图中的金额明显不一致。");
-  if (targetMismatch) items.push("目标地址与用户原始意图冲突，需要用户重新确认。");
+  if (targetMismatch) items.push("transfer 参数里的 to 与用户意图中的收款人不一致。");
   if (!sim.includes("成功")) items.push("simulation 没有明确成功结果。");
   else if (!isSimulationClean(sim)) items.push("simulation 成功但包含警告或异常信号。");
   return items.length ? items : ["未发现明显不确定点，但仍应核对钱包弹窗字段。"];
 }
 
 function buildRecommendedChecks(risk, recipient) {
-  const checks = [`核对钱包弹窗里的目标地址：${recipient || "unknown"}`];
+  const checks = [`核对钱包弹窗里的收款人或授权对象：${recipient || "unknown"}`];
   checks.push("核对资产、数量、网络和 gas。");
   if (risk === "medium" && inputState.missingFields.length > 0) checks.push("补全模板缺失字段后重新生成摘要。");
   if (risk === "high") checks.push("暂停签名，先用区块浏览器或可信来源验证目标地址。");
@@ -350,7 +371,7 @@ function validateResult(result, source) {
       title: "Web3 风险规则",
       state: mismatchDetected && approvalDetected ? "pass" : "warn",
       body: mismatchDetected && approvalDetected
-        ? "意图不匹配和授权变化能被代码层规则复核。"
+        ? "收款人不匹配、授权对象不匹配和授权变化能被代码层规则复核。"
         : "存在 prompt 可能漏判的风险，需要 Guard 拦截。"
     },
     {
@@ -371,7 +392,7 @@ function validateResult(result, source) {
       title: "低风险规则",
       state: lowRiskRuleOk ? "pass" : "fail",
       body: lowRiskRuleOk
-        ? "只有字段完整、simulation 成功且无警告、意图一致、无异常授权时才允许 low。"
+        ? "只有字段完整、Simulation 成功且无警告、用户意图和实际参数一致、无异常授权时才允许 low。"
         : "当前输出不满足 low 的全部前置条件。"
     }
   ];
