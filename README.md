@@ -6,6 +6,31 @@
 - 使用固定模板输入交易信息：用户意图、交易目标地址、函数名、参数、资产变化和 Simulation。
 - 输出固定 JSON 字段。
 - 准备三组测试：普通转账、无限授权、目标地址与用户意图不匹配。
+  
+  1）普通转账：
+  用户意图：我想给 Alice 转 100 USDC
+交易目标地址：0xUSDC_TOKEN
+函数名：transfer
+参数：to=0xAlice, amount=100 USDC
+资产变化：用户减少 100 USDC
+Simulation：成功，没有警告
+
+2）无限授权：
+用户意图：我想授权 Uniswap 使用 50 USDC 来兑换
+交易目标地址：0xUSDC_TOKEN
+函数名：approve
+参数：spender=0xUnknownSpender, amount=unlimited
+资产变化：没有直接资产转出
+Simulation：成功，警告：Approval amount is unlimited
+
+3）目标地址与用户意图不匹配：
+用户意图：我想给 Alice 转 100 USDC
+交易目标地址：0xUSDC_TOKEN
+函数名：transfer
+参数：to=0xMallory, amount=100 USDC
+资产变化：用户减少 100 USDC
+Simulation：成功，没有警告
+
 - 高优先级风险规则会先于普通判断执行：无限授权必须 high；用户意图里的授权对象与 spender 不匹配或 spender 未知时也必须 high。
 
 ## 如何运行
@@ -14,7 +39,7 @@
 
 ## Demo 说明
 
-页面分成四块：
+页面分成三块：
 
 - 交易输入：一个模板文本框，按标签填写用户意图、交易目标地址、函数名、参数、资产变化和 Simulation。
 - 结构化输出：模拟模型返回的 JSON。
